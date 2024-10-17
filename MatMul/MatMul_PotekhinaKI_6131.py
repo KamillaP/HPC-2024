@@ -34,7 +34,7 @@ def run_experiments(sizes):
 
     return results
 
-sizes = [100, 500, 1000, 1500, 2000]
+sizes = [100, 2000]
 results = run_experiments(sizes)
 
 for size, cpu_time, gpu_time, is_correct in results:
