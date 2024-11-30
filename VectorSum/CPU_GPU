@@ -1,0 +1,71 @@
+import numpy as np
+import time
+from numba import cuda, njit
+
+# CPU-реализация суммы элементов вектора
+@njit
+def sum_on_cpu(vector):
+    return np.sum(vector)
+
+# GPU-реализация суммы элементов вектора
+@cuda.jit
+def sum_on_gpu(vector, result):
+    shared_sum = cuda.shared.array(shape=1024, dtype=numba.float64)
+    tid = cuda.threadIdx.x
+    bid = cuda.blockIdx.x
+    bdim = cuda.blockDim.x
+
+    idx = bid * bdim + tid
+
+    if idx < vector.size:
+        shared_sum[tid] = vector[idx]
+    else:
+        shared_sum[tid] = 0
+
+    cuda.syncthreads()
+
+    # Редукция суммы внутри блока
+    i = bdim // 2
+    while i > 0:
+        if tid < i:
+            shared_sum[tid] += shared_sum[tid + i]
+        cuda.syncthreads()
+        i //= 2
+
+    if tid == 0:
+        result[bid] = shared_sum[0]
+
+def vector_sum_cpu(vector):
+    start_time = time.time()
+    result = sum_on_cpu(vector)
+    elapsed_time = time.time() - start_time
+    return result, elapsed_time
+
+def vector_sum_gpu(vector):
+    threads_per_block = 1024
+    blocks_per_grid = (vector.size + threads_per_block - 1) // threads_per_block
+
+    vector_device = cuda.to_device(vector)
+    result_device = cuda.device_array(blocks_per_grid, dtype=np.float64)
+
+    start_time = time.time()
+    sum_on_gpu[blocks_per_grid, threads_per_block](vector_device, result_device)
+    cuda.synchronize()
+
+    result = result_device.copy_to_host()
+    final_sum = np.sum(result)
+    elapsed_time = time.time() - start_time
+
+    return final_sum, elapsed_time
+
+if __name__ == "__main__":
+    vector_size = 10**6
+    vector = np.random.rand(vector_size).astype(np.float64)
+
+    # Сумма на CPU
+    cpu_result, cpu_time = vector_sum_cpu(vector)
+    print(f"CPU: Сумма = {cpu_result}, Время = {cpu_time:.6f} сек")
+
+    # Сумма на GPU
+    gpu_result, gpu_time = vector_sum_gpu(vector)
+    print(f"GPU: Сумма = {gpu_result}, Время = {gpu_time:.6f} сек")
