@@ -1,0 +1,81 @@
+import wave
+import numpy as np
+import matplotlib.pyplot as plt
+import cupy as cp
+from scipy.fft import fft
+from time import time
+from PIL import Image
+
+# Функция для чтения WAV-файла
+def read_wav(file_path):
+    with wave.open(file_path, 'rb') as wav_file:
+        params = wav_file.getparams()
+        n_channels, sampwidth, framerate, n_frames = params[:4]
+        print(f"Чтение файла: {file_path}")
+        print(f"Каналы: {n_channels}, Частота дискретизации: {framerate} Гц, Количество фреймов: {n_frames}")
+        frames = wav_file.readframes(n_frames)
+        signal = np.frombuffer(frames, dtype=np.int16)
+        return signal, framerate
+
+# Функция для вычисления спектрограммы с использованием FFT (CPU)
+def compute_spectrogram_cpu(signal, framerate, chunk_size, overlap):
+    step = chunk_size - overlap
+    spectrogram = []
+    for start in range(0, len(signal) - chunk_size + 1, step):
+        chunk = signal[start:start + chunk_size]
+        fft_chunk = np.abs(fft(chunk))[:chunk_size // 2]
+        spectrogram.append(fft_chunk)
+    return np.array(spectrogram).T
+
+# Функция для вычисления спектрограммы с использованием CUFFT (GPU)
+def compute_spectrogram_gpu(signal, framerate, chunk_size, overlap):
+    step = chunk_size - overlap
+    spectrogram = []
+    signal_gpu = cp.array(signal, dtype=cp.float32)
+    for start in range(0, len(signal) - chunk_size + 1, step):
+        chunk = signal_gpu[start:start + chunk_size]
+        fft_chunk = cp.abs(cp.fft.fft(chunk))[:chunk_size // 2]
+        spectrogram.append(cp.asnumpy(fft_chunk))
+    return np.array(spectrogram).T
+
+# Функция для сохранения спектрограммы в BMP-формате
+def save_spectrogram_bmp(spectrogram, output_path):
+    spectrogram = np.log1p(spectrogram)  # Логарифмическая шкала
+    spectrogram = (255 * (spectrogram / np.max(spectrogram))).astype(np.uint8)
+    img = Image.fromarray(spectrogram)
+    img = img.convert("L")  # Черно-белое изображение
+    img.save(output_path)
+    print(f"Спектрограмма сохранена в файл: {output_path}")
+
+# Основная программа
+if __name__ == "__main__":
+    input_wav = "sample-15s.wav" 
+    output_bmp_cpu = "spectrogram_cpu.bmp"
+    output_bmp_gpu = "spectrogram_gpu.bmp"
+
+    chunk_size = 1024  # Размер блока
+    overlap = 512  # Перекрытие
+
+    # Чтение WAV-файла
+    signal, framerate = read_wav(input_wav)
+
+    # Вычисление спектрограммы на CPU
+    start_time = time()
+    spectrogram_cpu = compute_spectrogram_cpu(signal, framerate, chunk_size, overlap)
+    cpu_time = time() - start_time
+    print(f"Время обработки на CPU: {cpu_time:.2f} секунд")
+
+    # Сохранение спектрограммы CPU
+    save_spectrogram_bmp(spectrogram_cpu, output_bmp_cpu)
+
+    # Вычисление спектрограммы на GPU
+    start_time = time()
+    spectrogram_gpu = compute_spectrogram_gpu(signal, framerate, chunk_size, overlap)
+    gpu_time = time() - start_time
+    print(f"Время обработки на GPU: {gpu_time:.2f} секунд")
+
+    # Сохранение спектрограммы GPU
+    save_spectrogram_bmp(spectrogram_gpu, output_bmp_gpu)
+
+    # Сравнение производительности
+    print(f"Ускорение GPU: {cpu_time / gpu_time:.2f}x")
